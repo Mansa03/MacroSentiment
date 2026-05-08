@@ -2,6 +2,7 @@ package com.mirror.dagger;
 
 import com.mirror.accessors.PsqlExecutor;
 import com.mirror.queries.TransactionResults;
+import com.zaxxer.hikari.HikariDataSource;
 import dagger.Module;
 import dagger.Provides;
 
@@ -9,13 +10,11 @@ import javax.inject.Singleton;
 import javax.inject.Named;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.google.common.collect.Lists;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.mirror.ingestion.NewsPoller;
 import com.mirror.ingestion.PollingManager;
 import com.mirror.models.v1.ImmutableRawAPINews;
-import com.mirror.deserializers.v1.CustomRawAPINewsDeserializer;
 import com.mirror.queries.QueryBiFunction;
 import com.mirror.queries.v1.BatchRawAPINews;
 
@@ -45,11 +44,7 @@ public class ApplicationModule {
     @Provides
     @Singleton
     public ObjectMapper provideObjectMapper() {
-        ObjectMapper objectMapper = new ObjectMapper();
-        SimpleModule module = new SimpleModule();
-        module.addDeserializer(ImmutableRawAPINews.class, new CustomRawAPINewsDeserializer());
-        objectMapper.registerModule(module);
-        return objectMapper;
+         return new ObjectMapper();
     }
     
     @Provides
@@ -60,8 +55,8 @@ public class ApplicationModule {
 
     @Provides
     @Singleton
-    public PsqlExecutor<ImmutableRawAPINews> providePsqlAccessor(@NonNull @Named(ResourceModule.PSQL_CONNECTION) Connection conn, @NonNull RedisAccessor redisClient, @NonNull @Named(PSQL_BATCH_INSERT_FUNCTION) QueryBiFunction<Connection, List<ImmutableRawAPINews>, TransactionResults<ImmutableRawAPINews>> batchInsertFunction) {
-        return new PsqlExecutor<ImmutableRawAPINews>(conn, redisClient, batchInsertFunction);
+    public PsqlExecutor<ImmutableRawAPINews> providePsqlAccessor(HikariDataSource dataSource, @NonNull RedisAccessor redisClient, @NonNull @Named(PSQL_BATCH_INSERT_FUNCTION) QueryBiFunction<Connection, List<ImmutableRawAPINews>, TransactionResults<ImmutableRawAPINews>> batchInsertFunction) {
+        return new PsqlExecutor<ImmutableRawAPINews>(dataSource, redisClient, batchInsertFunction);
     }
 
     @Provides

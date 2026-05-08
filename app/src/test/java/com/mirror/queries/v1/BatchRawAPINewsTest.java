@@ -1,5 +1,6 @@
 package com.mirror.queries.v1;
 
+import com.mirror.TestHelper;
 import com.mirror.queries.TransactionResults;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -26,15 +27,6 @@ import org.mockito.Mockito;
 @ExtendWith(MockitoExtension.class)
 @Slf4j
 public class BatchRawAPINewsTest {
-    private final String TEST_URL = "TEST_URL";
-    private final String TEST_SOURCE_ID = "TEST_SOURCE_ID";
-    private final String TEST_SOURCE_NAME = "TEST_SOURCE_NAME";
-    private final String TEST_AUTHOR = "TEST_AUTHOR";
-    private final String TEST_TITLE = "TEST_TITLE";
-    private final String TEST_DESCRIPTION = "TEST_DESCRIPTION";
-    private final String TEST_URL_TO_IMAGE = "TEST_URL_TO_IMAGE";
-    private final String TEST_PUBLISHED_AT = "TEST_PUBLISHED_AT";
-    private final String TEST_CONTENT = "TEST_CONTENT";
     private final int[] SUCCESS = {1,1,1,1,1,1,1,1,-2,1,1,1,1,1,1,1,-2,1,1,1};
     private final int[] FAILED_EXECUTE = {1,1,1,1,1,1,-3,1,1,1,-3,1,1,-3,-3,1,1,1,1,1};
     private final int[] SKIPPED_EXECUTE = {1,1,1,1,1,1,0,1,1,1,0,1,1,0,0,1,1,1,1,1};
@@ -51,7 +43,7 @@ public class BatchRawAPINewsTest {
 
     @Test
     public void testNonRetryableBatchFailures() {
-        List<ImmutableRawAPINews> transactions = createNewsBatches(1, 20);
+        List<ImmutableRawAPINews> transactions = TestHelper.createNewsBatches(1, 20);
         try{
         Mockito.when(mockConn.prepareStatement(anyString())).thenReturn(mockPstmt);
         Mockito.doNothing().when(mockPstmt).setString(Mockito.anyInt(), Mockito.anyString());
@@ -69,7 +61,7 @@ public class BatchRawAPINewsTest {
 
     @Test
     public void testRetryableBatchFailures() {
-        List<ImmutableRawAPINews> transactions = createNewsBatches(1, 20);
+        List<ImmutableRawAPINews> transactions = TestHelper.createNewsBatches(1, 20);
         try{
             Mockito.when(mockConn.prepareStatement(anyString())).thenReturn(mockPstmt);
             Mockito.doNothing().when(mockPstmt).setString(Mockito.anyInt(), Mockito.anyString());
@@ -87,7 +79,7 @@ public class BatchRawAPINewsTest {
 
     @Test
     public void testSkipped() {
-        List<ImmutableRawAPINews> transactions = createNewsBatches(1, 20);
+        List<ImmutableRawAPINews> transactions = TestHelper.createNewsBatches(1, 20);
         try{
             Mockito.when(mockConn.prepareStatement(anyString())).thenReturn(mockPstmt);
             Mockito.doNothing().when(mockPstmt).setString(Mockito.anyInt(), Mockito.anyString());
@@ -104,7 +96,7 @@ public class BatchRawAPINewsTest {
 
     @Test
     public void testSuccess() {
-        List<ImmutableRawAPINews> transactions = createNewsBatches(1, 20);
+        List<ImmutableRawAPINews> transactions = TestHelper.createNewsBatches(1, 20);
         try{
             Mockito.when(mockConn.prepareStatement(anyString())).thenReturn(mockPstmt);
             Mockito.doNothing().when(mockPstmt).setString(Mockito.anyInt(), Mockito.anyString());
@@ -121,7 +113,7 @@ public class BatchRawAPINewsTest {
 
     @Test
     public void testSkippedAndFailed() {
-        List<ImmutableRawAPINews> transactions = createNewsBatches(1, 20);
+        List<ImmutableRawAPINews> transactions = TestHelper.createNewsBatches(1, 20);
         try{
             Mockito.when(mockConn.prepareStatement(anyString())).thenReturn(mockPstmt);
             Mockito.doNothing().when(mockPstmt).setString(Mockito.anyInt(), Mockito.anyString());
@@ -142,7 +134,7 @@ public class BatchRawAPINewsTest {
 
     @Test
     public void testHandleSQLException() {
-        List<ImmutableRawAPINews> transactions = createNewsBatches(1, 20);
+        List<ImmutableRawAPINews> transactions = TestHelper.createNewsBatches(1, 20);
         try{
             Mockito.when(mockConn.prepareStatement(anyString())).thenReturn(mockPstmt);
             Mockito.doNothing().when(mockPstmt).setString(Mockito.anyInt(), Mockito.anyString());
@@ -156,25 +148,4 @@ public class BatchRawAPINewsTest {
         }
     }
 
-
-
-
-
-    public List<ImmutableRawAPINews> createNewsBatches(int numOfBatches, int batchSize) {
-        List<ImmutableRawAPINews> newsList = new ArrayList<>();
-        for (int i = 0; i < numOfBatches * batchSize; i++) {
-            newsList.add(ImmutableRawAPINews.builder()
-                .url(TEST_URL + i)
-                .sourceId(TEST_SOURCE_ID + i)
-                .sourceName(TEST_SOURCE_NAME + i)
-                .author(TEST_AUTHOR + i)
-                .title(TEST_TITLE + i)
-                .description(TEST_DESCRIPTION + i)
-                .urlToImage(TEST_URL_TO_IMAGE + i)
-                .publishedAt(TEST_PUBLISHED_AT + i)
-                .content(TEST_CONTENT + i)
-                .build());
-        }
-        return newsList;
-    }
 }

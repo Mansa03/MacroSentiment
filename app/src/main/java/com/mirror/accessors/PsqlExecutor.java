@@ -16,82 +16,113 @@ import lombok.extern.slf4j.Slf4j;
 import lombok.NonNull;
 import lombok.AllArgsConstructor;
 
+import javax.sql.DataSource;
+
 @Slf4j
 @AllArgsConstructor
 public class PsqlExecutor<T> {
+
     private static final int BATCH_SIZE = 500;
     private static final int MAX_RETRIES = 3;
-    @NonNull
-    private final Connection conn;
-    @NonNull
-    private final RedisAccessor redisClient;
-    @NonNull
-    private final QueryBiFunction<Connection, List<T>, TransactionResults<T>> batchInsert;
+    private static final long BASE_DELAY_MS = 1000L;
 
+    @NonNull private final DataSource dataSource;       // not Connection
+    @NonNull private final RedisAccessor redisClient;
+    @NonNull private final QueryBiFunction<Connection, List<T>, TransactionResults<T>> batchInsert;
 
+    public TransactionResults<T> applyBatchInsert(
+            List<T> items,
+            String keywords,
+            String nextTimeStamp) throws InterruptedException {
 
-    public TransactionResults<T> applyBatchInsert(List<T> items, String keywords, String nextTimeStamp) throws InterruptedException{
-        List<T> successfulTransactions = new ArrayList<>();
-        List<T> skippedTransactions = new ArrayList<>();
-        List<T> failedTransactions = new ArrayList<>();
-        List<List<T>> batches = Lists.partition(items, BATCH_SIZE);
-        for (List<T> batch: batches) {
-            List<T> transactions = batch;
-            int attempts = 0;
-            while (attempts < MAX_RETRIES) {
-                try {
-                    TransactionResults<T> results = batchInsert.apply(conn, transactions);
-                    if (!results.successfullTransactions().isEmpty()) {
-                        conn.commit();
-                    }
-                    transactions = results.failedTransactions().RetryableTransactions();
-                    successfulTransactions.addAll(results.successfullTransactions());
-                    skippedTransactions.addAll(results.skippedTransactions());
-                    failedTransactions.addAll(results.failedTransactions().UnRetryableTransactions());
-                    if (results.failedTransactions().RetryableTransactions().isEmpty()) {
-                        break;
-                    }
-                    attempts++;
-                    if (attempts < MAX_RETRIES) {
-                        Thread.sleep(1000 * (1L << attempts));
-                    } else {
-                        failedTransactions.addAll(transactions);
-                    }
-                } catch (SQLException E) {
-                    try {
-                        conn.rollback();
-                    } catch (SQLException re) {
-                        failedTransactions.addAll(transactions);
-                        log.error("Rollback failed", re);
-                    }
-                    String state = E.getSQLState();
-                    if (state != null && state.startsWith("08")) {
-                        log.error("connection failed with SQL STATE {%s}".formatted(state));
-                    }
-                    attempts++;
-                    log.error("batch attempt {%d}/{%d} failed with SQL STATE {%s}".formatted(attempts, MAX_RETRIES, state));
-                    if (attempts < MAX_RETRIES) {
-                        try {
-                            Thread.sleep(1000 * (1L << attempts));
-                        } catch (InterruptedException ie) {
-                            Thread.currentThread().interrupt();
-                            log.warn("PsqlExecutor interrupted");
-                            throw ie;
-                        }
-                    } else {
-                        failedTransactions.addAll(transactions);
-                    }
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    log.warn("PsqlExecutor interrupted");
-                    throw ie;
-                }
-            }
+        List<T> succeeded = new ArrayList<>();
+        List<T> skipped   = new ArrayList<>();
+        List<T> failed    = new ArrayList<>();
+
+        for (List<T> batch : Lists.partition(items, BATCH_SIZE)) {
+            processBatch(batch, succeeded, skipped, failed);
         }
-        if (!successfulTransactions.isEmpty()) {
-            redisClient.set(keywords,nextTimeStamp);
+
+        if (!succeeded.isEmpty()) {
+            redisClient.set(keywords, nextTimeStamp);
         }
-        return new TransactionResults<>(successfulTransactions, skippedTransactions, new FailedTransactions<>(List.of(), failedTransactions));
+
+        return new TransactionResults<>(
+                succeeded,
+                skipped,
+                new FailedTransactions<>(List.of(), failed)
+        );
     }
 
+    private void processBatch(
+            List<T> batch,
+            List<T> succeeded,
+            List<T> skipped,
+            List<T> failed) throws InterruptedException {
+
+        List<T> toProcess = batch;
+        int attempts = 0;
+
+        while (attempts < MAX_RETRIES) {
+            try (Connection conn = dataSource.getConnection())  {
+                TransactionResults<T> results = batchInsert.apply(conn, toProcess);
+
+                // only commit if something succeeded
+                if (!results.successfullTransactions().isEmpty()) {
+                    conn.commit();
+                }
+                // no rollback needed if nothing succeeded — connection is clean
+
+                succeeded.addAll(results.successfullTransactions());
+                skipped.addAll(results.skippedTransactions());
+                failed.addAll(results.failedTransactions().UnRetryableTransactions());
+
+                List<T> retryable = results.failedTransactions().RetryableTransactions();
+
+                if (retryable.isEmpty()) {
+                    return;  // batch done
+                }
+
+                toProcess = retryable;
+                attempts++;
+
+                if (attempts >= MAX_RETRIES) {
+                    log.warn("Max retries reached, dead lettering {} rows", toProcess.size());
+                    failed.addAll(toProcess);
+                    return;
+                }
+
+                sleep(attempts);
+
+            } catch (SQLException e) {
+                attempts++;
+                String state = e.getSQLState();
+                log.error("Batch attempt {}/{} failed sqlstate={}", attempts, MAX_RETRIES, state);
+
+                if (attempts >= MAX_RETRIES) {
+                    log.error("Max retries exhausted, dead lettering {} rows", toProcess.size());
+                    failed.addAll(toProcess);
+                    return;
+                }
+
+                // connection borrowed via try-with-resources
+                // rollback + close handled automatically on exception
+                sleep(attempts);
+
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                log.warn("PsqlExecutor interrupted");
+                throw ie;
+            }
+        }
+    }
+
+    private void sleep(int attempt) throws InterruptedException {
+        try {
+            Thread.sleep(BASE_DELAY_MS * (1L << attempt));
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw ie;
+        }
+    }
 }

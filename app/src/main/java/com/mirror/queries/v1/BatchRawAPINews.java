@@ -37,8 +37,8 @@ public class BatchRawAPINews implements QueryBiFunction<Connection, List<Immutab
         try (PreparedStatement pstmt = conn.prepareStatement(insertSQL)) {
             for (ImmutableRawAPINews news : rawAPINewsList) {
                 pstmt.setString(1, news.url());
-                pstmt.setString(2, news.sourceId());
-                pstmt.setString(3, news.sourceName());
+                pstmt.setString(2, news.source().id());
+                pstmt.setString(3, news.source().name());
                 pstmt.setString(4, news.author());
                 pstmt.setString(5, news.title());
                 pstmt.setString(6, news.description());

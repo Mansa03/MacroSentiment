@@ -3,6 +3,7 @@ package com.mirror.ingestion;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalUnit;
@@ -13,11 +14,8 @@ import java.net.URI;
 
 import com.mirror.accessors.RedisAccessor;
 import com.mirror.accessors.NewsAPIAccessor;
-import com.mirror.models.v1.ImmutableAPINewsResponse;
-import com.mirror.models.v1.ImmutableRawAPINews;
-import com.mirror.models.v1.NewsAPIStatusCodes;
+import com.mirror.models.v1.*;
 
-import com.mirror.models.v1.PollStatus;
 import redis.clients.jedis.RedisClient;
 
 import com.google.common.collect.ImmutableList;
@@ -29,16 +27,15 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @AllArgsConstructor
 public class NewsPoller implements Callable<PollResults> {
-    public static final String AUTHORED_BY_NEWS_POLLER = "Authored by NewsPoller";
     private final NewsAPIAccessor newsAPIAccessor;
     private final List<String> keywords;
     private final RedisAccessor redisAccessor;
     private final ObjectMapper objectMapper;
     @Override
-    public PollResults call(){
+    public PollResults call() throws InterruptedException{
         try{
             String fromTimeStamp = redisAccessor.get(keywords.toString()).orElse(null);
-            String nextFromTimeStamp = LocalDate.now(ZoneOffset.UTC).minus(120, ChronoUnit.SECONDS).toString();
+            String nextFromTimeStamp = LocalDateTime.now(ZoneOffset.UTC).minusSeconds(120).toString();
             if (fromTimeStamp == null) {
                 fromTimeStamp = LocalDate.now(ZoneOffset.UTC)
                       .minusDays(1)
@@ -53,21 +50,20 @@ public class NewsPoller implements Callable<PollResults> {
                     // Process the news data
                     try {
                         ImmutableAPINewsResponse response = objectMapper.readValue(newsData.get(), ImmutableAPINewsResponse.class);
-                        ImmutableList<ImmutableRawAPINews> articles = response.articles();
-                        return new PollResults(articles, null, nextFromTimeStamp, PollStatus.SUCCESS);
+                        return new PollResults(ImmutableList.copyOf(response.articles()), null, nextFromTimeStamp, PollStatus.SUCCESS);
                     } catch (Exception e) {
                         log.error("Error processing news data: {} for keywords: {}, from timestamp: {}", e.getMessage(), keywords, fromTimeStamp);
                         return new PollResults(ImmutableList.of(), newsData.get(), fromTimeStamp, PollStatus.PARSE_FAILURE);
                     }
                 }
             }
-            log.error("Failed to retrieve news data for keywords: {}, from timestamp: {}".formatted(keywords, fromTimeStamp));
-            return new PollResults(ImmutableList.of(), null, fromTimeStamp, PollStatus.FETCH_FAILURE);
+            log.error("Failed to retrieve news data for keywords: %s, from timestamp: %s".formatted(keywords, fromTimeStamp));
+            return new PollResults(ImmutableList.of(), newsData.orElse(null), fromTimeStamp, PollStatus.FETCH_FAILURE);
         } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
                 log.warn("Thread interrupted while fetching news, shuttingdown");
+                throw ie;
         }
-        return new PollResults(ImmutableList.of(), null, null, PollStatus.FETCH_FAILURE);
     }
 
     public String getKeywords() {

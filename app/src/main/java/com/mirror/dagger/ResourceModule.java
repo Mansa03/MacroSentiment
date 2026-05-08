@@ -4,7 +4,7 @@ import java.io.InputStream;
 import java.net.http.HttpClient;
 import dagger.Module;
 import dagger.Provides;
-import jakarta.inject.Singleton;
+import javax.inject.Singleton;
 
 import javax.inject.Named;
 
@@ -41,15 +41,23 @@ public class ResourceModule {
     }
 
     @Provides
-    @Named(PSQL_CONNECTION)
-    public Connection providePSQLConnection(@NonNull @Named(EnvironmentModule.PSQL_CONNECTION_URL) String psqlUrl) {
-        try {
-            Connection conn = DriverManager.getConnection(psqlUrl, "user", "password");
-            conn.setAutoCommit(true);
-            return conn;
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to establish PSQL connection", e);
-        }
+    @Singleton
+    public HikariConfig provideHikariConfig(@NonNull @Named(EnvironmentModule.PSQL_CONNECTION_URL) String psqlUrl) {
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl(psqlUrl);
+        config.setAutoCommit(false);
+        config.setUsername("user");
+        config.setPassword("password");
+        config.setMaximumPoolSize(20);
+        config.setIdleTimeout(Duration.ofSeconds(10).toMillis());
+        config.setConnectionTimeout(Duration.ofSeconds(10).toMillis());
+        return config;
+    }
+
+    @Provides
+    @Singleton
+    public HikariDataSource providesDataSource(HikariConfig config) {
+        return new HikariDataSource(config);
     }
 
 
@@ -87,12 +95,11 @@ public class ResourceModule {
         poolConfig.setMaxIdle(20);
         poolConfig.setMinIdle(0);
         poolConfig.setTestOnBorrow(true);
-        poolConfig.setTestOnReturn(true);
         poolConfig.setTestWhileIdle(true);
         poolConfig.setNumTestsPerEvictionRun(-1);
-        poolConfig.setTimeBetweenEvictionRuns(Duration.ofSeconds(1));
+        poolConfig.setTimeBetweenEvictionRuns(Duration.ofSeconds(30));
         poolConfig.setBlockWhenExhausted(true);
-        poolConfig.setMaxWait(Duration.ofSeconds(1));
+        poolConfig.setMaxWait(Duration.ofSeconds(10));
         return poolConfig;
     }
 

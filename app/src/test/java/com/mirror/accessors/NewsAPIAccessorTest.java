@@ -28,9 +28,7 @@ import com.mirror.ingestion.ResponseResult;
 public class NewsAPIAccessorTest {
     private static final String DUMMY_KEY = "dummy_key";
     @Mock
-    private HttpClient httpClient;
-    @Mock
-    private HttpResponse<String> httpResponse;
+    private HttpClient httpClientMock;
     private NewsAPIAccessor newsAPIAccessor;
 
     private class DummyHttpResponse<T> implements HttpResponse<T> {
@@ -142,15 +140,15 @@ public class NewsAPIAccessorTest {
     @BeforeEach
     public void setup() {
         MockitoAnnotations.openMocks(this);
-        newsAPIAccessor = new NewsAPIAccessor(DUMMY_KEY, httpClient);
+        newsAPIAccessor = new NewsAPIAccessor(DUMMY_KEY, httpClientMock);
     }
 
     @Test
     public void testGetNews() {
         try{
-        Mockito.when(httpClient.send(Mockito.any(), Mockito.any())).thenReturn(DUMMY_HTTP_RESPONSE);
+        Mockito.when(httpClientMock.send(Mockito.any(), Mockito.any())).thenReturn(DUMMY_HTTP_RESPONSE);
         ResponseResult response = newsAPIAccessor.getNews(QUERY1_LIST, PUBLISHED_FROM_1);
-        Mockito.verify(httpClient, Mockito.times(1)).send(Mockito.any(), Mockito.any());
+        Mockito.verify(httpClientMock, Mockito.times(1)).send(Mockito.any(), Mockito.any());
         Assertions.assertEquals(EXPECTED_URI, response.uri().toString());
         Assertions.assertEquals(response.responseBody().orElse(null), DUMMY_HTTP_RESPONSE.body());
             Assertions.assertSame(NewsAPIStatusCodes.OK, response.statusCode());
@@ -162,7 +160,7 @@ public class NewsAPIAccessorTest {
     @Test
     public void testGetNewsWithMultipleKeywords() {
         try {
-            Mockito.when(httpClient.send(Mockito.any(), Mockito.any())).thenReturn(DUMMY_HTTP_RESPONSE_MULTIPLE_KEYWORDS);
+            Mockito.when(httpClientMock.send(Mockito.any(), Mockito.any())).thenReturn(DUMMY_HTTP_RESPONSE_MULTIPLE_KEYWORDS);
             ResponseResult response = newsAPIAccessor.getNews(QUERY_MULTIPLE_LIST, PUBLISHED_FROM_1);
             Assertions.assertEquals(EXPECTED_MULTIPLE_URI, response.uri().toString());
             Assertions.assertEquals(response.responseBody().orElse(null), DUMMY_HTTP_RESPONSE_MULTIPLE_KEYWORDS.body());
@@ -175,12 +173,12 @@ public class NewsAPIAccessorTest {
     @Test
     public void testGetNewsWithRetries() {
         try {
-            Mockito.when(httpClient.send(Mockito.any(), Mockito.any()))
+            Mockito.when(httpClientMock.send(Mockito.any(), Mockito.any()))
                     .thenThrow(new IOException("Network error"))
                     .thenThrow(new IOException("Network error"))
                     .thenReturn(DUMMY_HTTP_RESPONSE);
            ResponseResult response = newsAPIAccessor.getNews(QUERY1_LIST, PUBLISHED_FROM_1);
-            Mockito.verify(httpClient, Mockito.times(3)).send(Mockito.any(), Mockito.any());
+            Mockito.verify(httpClientMock, Mockito.times(3)).send(Mockito.any(), Mockito.any());
             Assertions.assertEquals(response.responseBody().orElse(null), DUMMY_HTTP_RESPONSE.body());
             Assertions.assertSame(NewsAPIStatusCodes.OK, response.statusCode());
         } catch (Exception e) {
@@ -191,10 +189,10 @@ public class NewsAPIAccessorTest {
     @Test
     public void testGetNewsWithRetriesExhausted() {
         try {
-            Mockito.when(httpClient.send(Mockito.any(), Mockito.any()))
+            Mockito.when(httpClientMock.send(Mockito.any(), Mockito.any()))
                     .thenThrow(new IOException("Network error"));
             ResponseResult response = newsAPIAccessor.getNews(QUERY1_LIST, PUBLISHED_FROM_1);
-            Mockito.verify(httpClient, Mockito.times(3)).send(Mockito.any(), Mockito.any());
+            Mockito.verify(httpClientMock, Mockito.times(3)).send(Mockito.any(), Mockito.any());
             Assertions.assertTrue(response.responseBody().isEmpty());
             Assertions.assertSame(NewsAPIStatusCodes.SERVER_ERROR, response.statusCode());
         } catch (Exception e) {
@@ -205,10 +203,10 @@ public class NewsAPIAccessorTest {
     @Test
     public void testGetNewsWithThrottlingExhausted() {
         try {
-            Mockito.when(httpClient.send(Mockito.any(), Mockito.any()))
+            Mockito.when(httpClientMock.send(Mockito.any(), Mockito.any()))
                     .thenReturn(DUMMY_HTTP_THROTTLING_RESPONSE);
             ResponseResult response = newsAPIAccessor.getNews(QUERY1_LIST, PUBLISHED_FROM_1);
-            Mockito.verify(httpClient, Mockito.times(3)).send(Mockito.any(), Mockito.any());
+            Mockito.verify(httpClientMock, Mockito.times(3)).send(Mockito.any(), Mockito.any());
             Assertions.assertTrue(response.responseBody().isEmpty());
             Assertions.assertSame(NewsAPIStatusCodes.THROTTLING, response.statusCode());
         } catch (Exception e) {
@@ -219,10 +217,10 @@ public class NewsAPIAccessorTest {
     @Test
     public void testGetNewsUnauthorized() {
         try {
-            Mockito.when(httpClient.send(Mockito.any(), Mockito.any()))
+            Mockito.when(httpClientMock.send(Mockito.any(), Mockito.any()))
                     .thenReturn(DUMMY_HTTP_RESPONSE_UNAUTHORIZED);
             ResponseResult response = newsAPIAccessor.getNews(QUERY1_LIST, PUBLISHED_FROM_1);
-            Mockito.verify(httpClient, Mockito.times(1)).send(Mockito.any(), Mockito.any());
+            Mockito.verify(httpClientMock, Mockito.times(1)).send(Mockito.any(), Mockito.any());
             Assertions.assertTrue(response.responseBody().isEmpty());
             Assertions.assertSame(NewsAPIStatusCodes.UNAUTHORIZED, response.statusCode());
         } catch (Exception e) {
@@ -233,10 +231,10 @@ public class NewsAPIAccessorTest {
     @Test
     public void testGetNewsBadRequset(){
         try {
-            Mockito.when(httpClient.send(Mockito.any(), Mockito.any()))
+            Mockito.when(httpClientMock.send(Mockito.any(), Mockito.any()))
                     .thenReturn(DUMMY_HTTP_RESPONSE_BAD_REQUEST);
             ResponseResult response = newsAPIAccessor.getNews(QUERY1_LIST, PUBLISHED_FROM_1);
-            Mockito.verify(httpClient, Mockito.times(1)).send(Mockito.any(), Mockito.any());
+            Mockito.verify(httpClientMock, Mockito.times(1)).send(Mockito.any(), Mockito.any());
             Assertions.assertTrue(response.responseBody().isEmpty());
             Assertions.assertSame(NewsAPIStatusCodes.BAD_REQUEST, response.statusCode());
         } catch (Exception e) {

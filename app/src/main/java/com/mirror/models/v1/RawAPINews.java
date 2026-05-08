@@ -1,12 +1,14 @@
 package com.mirror.models.v1;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import org.immutables.value.Value;
 
 import java.util.UUID;
 
 @Value.Immutable
+@Value.Style(jdkOnly = true)
+@JsonDeserialize(as=ImmutableRawAPINews.class)
 public interface RawAPINews {
-    String sourceId();
-    String sourceName();
+    Source source();
     String author();
     String title();
     String description();
