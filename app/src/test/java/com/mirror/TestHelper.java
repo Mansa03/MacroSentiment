@@ -2,12 +2,12 @@ package com.mirror;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.collect.ImmutableList;
 import com.mirror.ingestion.ResponseResult;
 import com.mirror.models.v1.ImmutableRawAPINews;
 import com.mirror.models.v1.ImmutableSource;
 import com.mirror.models.v1.NewsAPIStatusCodes;
 
-import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
@@ -48,6 +48,26 @@ public final class TestHelper {
         return newsList;
     }
 
+    public static ImmutableList<ImmutableRawAPINews> createNewsList(int numOfRecords) {
+        List<ImmutableRawAPINews> newsList = new ArrayList<>();
+        for (int i = 0; i < numOfRecords; i++) {
+            newsList.add(ImmutableRawAPINews.builder()
+                    .url(TEST_URL)
+                    .source(ImmutableSource.builder()
+                            .id(TEST_SOURCE_ID + i)
+                            .name(TEST_SOURCE_NAME + i)
+                            .build())
+                    .author(TEST_AUTHOR + i)
+                    .title(TEST_TITLE + i)
+                    .description(TEST_DESCRIPTION + i)
+                    .urlToImage(TEST_URL_TO_IMAGE + i)
+                    .publishedAt(TEST_PUBLISHED_AT + i)
+                    .content(TEST_CONTENT + i)
+                    .build());
+        }
+        return ImmutableList.copyOf(newsList);
+    }
+
     public static ResponseResult createResponseResult(int numRecords, NewsAPIStatusCodes code, URI uri) throws JsonProcessingException {
         ObjectMapper mapper = new ObjectMapper();
         int numOfbatches = numRecords >= 20 ? numRecords / 20 : 1;
@@ -56,9 +76,9 @@ public final class TestHelper {
         StringBuilder builder = new StringBuilder();
         builder.append(""" 
                 {"status": "%s", "totalResults": "%d", "articles": %s
-                }""".formatted(code,numRecords,newsAsString));
+                }""".formatted(code, numRecords, newsAsString));
         String responseBody = builder.toString();
-        return new ResponseResult(uri, Optional.of(responseBody),code);
+        return new ResponseResult(uri, Optional.of(responseBody), code);
 
     }
 }

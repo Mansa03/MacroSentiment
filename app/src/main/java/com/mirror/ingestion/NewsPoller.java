@@ -1,27 +1,22 @@
 package com.mirror.ingestion;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.collect.ImmutableList;
+import com.mirror.accessors.NewsAPIAccessor;
+import com.mirror.accessors.RedisAccessor;
+import com.mirror.models.v1.ImmutableAPINewsResponse;
+import com.mirror.models.v1.NewsAPIStatusCodes;
+import com.mirror.models.v1.PollStatus;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+import java.net.URI;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.time.temporal.ChronoUnit;
-import java.time.temporal.TemporalUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
-import java.net.URI;
-
-import com.mirror.accessors.RedisAccessor;
-import com.mirror.accessors.NewsAPIAccessor;
-import com.mirror.models.v1.*;
-
-import redis.clients.jedis.RedisClient;
-
-import com.google.common.collect.ImmutableList;
-
-import lombok.AllArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 
 
 @Slf4j
@@ -31,15 +26,16 @@ public class NewsPoller implements Callable<PollResults> {
     private final List<String> keywords;
     private final RedisAccessor redisAccessor;
     private final ObjectMapper objectMapper;
+
     @Override
-    public PollResults call() throws InterruptedException{
-        try{
-            String fromTimeStamp = redisAccessor.get(keywords.toString()).orElse(null);
+    public PollResults call() throws InterruptedException {
+        try {
+            String fromTimeStamp = redisAccessor.get(getKeywords()).orElse(null);
             String nextFromTimeStamp = LocalDateTime.now(ZoneOffset.UTC).minusSeconds(120).toString();
             if (fromTimeStamp == null) {
                 fromTimeStamp = LocalDate.now(ZoneOffset.UTC)
-                      .minusDays(1)
-                      .toString();
+                        .minusDays(1)
+                        .toString();
             }
             ResponseResult newsResponse = newsAPIAccessor.getNews(keywords, fromTimeStamp);
             URI uri = newsResponse.uri();
@@ -52,17 +48,17 @@ public class NewsPoller implements Callable<PollResults> {
                         ImmutableAPINewsResponse response = objectMapper.readValue(newsData.get(), ImmutableAPINewsResponse.class);
                         return new PollResults(ImmutableList.copyOf(response.articles()), null, nextFromTimeStamp, PollStatus.SUCCESS);
                     } catch (Exception e) {
-                        log.error("Error processing news data: {} for keywords: {}, from timestamp: {}", e.getMessage(), keywords, fromTimeStamp);
+                        log.error("Error processing news data: {} for keywords: {}, from timestamp: {}", e.getMessage(), this.getKeywords(), fromTimeStamp);
                         return new PollResults(ImmutableList.of(), newsData.get(), fromTimeStamp, PollStatus.PARSE_FAILURE);
                     }
                 }
             }
-            log.error("Failed to retrieve news data for keywords: %s, from timestamp: %s".formatted(keywords, fromTimeStamp));
+            log.error("Failed to retrieve news data for keywords: {}, from timestamp: {}", this.getKeywords(), fromTimeStamp);
             return new PollResults(ImmutableList.of(), newsData.orElse(null), fromTimeStamp, PollStatus.FETCH_FAILURE);
         } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                log.warn("Thread interrupted while fetching news, shuttingdown");
-                throw ie;
+            Thread.currentThread().interrupt();
+            log.warn("Thread interrupted while fetching news, shuttingdown");
+            throw ie;
         }
     }
 
