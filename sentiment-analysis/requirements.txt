@@ -1,0 +1,17 @@
+pytest
+playwright
+playwright-stealth
+polars
+torch
+trafilatura
+dbt-postgres
+dbt-duckdb
+redis
+logging
+huggingface-hub
+transformers
+langchain-text-splitters
+dependency-injector == 4.49.0
+psycopg == 3.3.0
+psycopg[binary]
+apache-airflow==3.2.1
