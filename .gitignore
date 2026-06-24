@@ -1,0 +1,36 @@
+# Airflow
+sentiment-analysis/airflow/airflow.db
+**/airflow-webserver.pid
+**/airflow/standalone_admin_password.txt
+**/airflow/logs/
+**/airflow/plugins/__pycache__/
+**/airflow/dags/__pycache__/
+**/airflow/airflow.db-shm
+**/airflow/airflow.db-wal
+**/airflow/airflow.db-wal
+**/airflow/simple_auth_manager_passwords.json.generated
+**/configs
+#not needed yet
+**/fovi/
+**/duckdb/
+# Secrets
+.env
+*.env
+airflow.cfg
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+.vscode/
+.gradle/
+.idea/
+build/
+bin/
+**/build/
+**/bin/
