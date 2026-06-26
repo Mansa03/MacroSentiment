@@ -4,17 +4,34 @@ from dependencyinjector.container import container
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import logging
 import polars
+import json
+from polars.dataframe import DataFrame
 import psycopg
+import duckdb
 from airflow.sdk import task, dag
 from playwright.sync_api import sync_playwright
 from playwright_stealth import Stealth
 from trafilatura import extract
 from transformers import BertTokenizer, BertForSequenceClassification, Pipeline, pipeline
+from gliner import GLiNER
 import os
 
+NEED_SCRAPED_CSV = "NEED_SCRAPED.csv"
+SUCCESSFULLY_SCRAPED = "SUCCESSFULLY_SCRAPED.json"
+FAILED_SCRAPED = "FAILED_SCRAPED.txt"
+
 conn_info = container.conn_info()
+postgres_url = container.psql_url()
+classification_labels = container.classification_labels()
 # Configure logging to output INFO messages and higher to the console
 logger = logging.getLogger(__name__)
+
+def get_temp_file_path(**context) -> str:
+    temp_file_path = r"temp/{}/".format(context['run_id'])
+    return temp_file_path
+
+def generate_path(file_name,**context) -> str:
+    return get_temp_file_path(**context) + file_name
 
 @dag(dag_id="SentimentAnalysis",
      description="Financial News Sentiment Analysis",
@@ -25,19 +42,29 @@ def sentiment_analysis() -> None:
     def query_news_articles(**context) -> list[str]:
         news_articles = list()
         schema = list()
-        with psycopg.connect(conn_info) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT * FROM raw_api_news_v1 WHERE transformed_at is NULL")
-                schema = [col.name for col in cursor.description]
-                news_articles.extend(cursor.fetchall())
-        logger.info(f"schema:{schema}")
-        logger.info(f"articles:{news_articles}")
-        context['ti'].xcom_push(key="articles", value=news_articles)
-        context['ti'].xcom_push(key="schema", value=schema)
+        with duckdb.connect() as conn:
+            conn.execute("INSTALL POSTGRES")
+            conn.execute("LOAD POSTGRES")
+            conn.execute(f"ATTACH '{conn_info}' AS postgres_db (TYPE POSTGRES)")
+            conn.execute("SELECT * FROM postgres_db.raw_api_news_v1 WHERE transformed_at is NULL")
+            schema = [col[0] for col in conn.description]
+            news_articles.extend(conn.fetchall())
+        df = DataFrame(data=news_articles,schema=schema, orient='row')
+        file_path = generate_path(NEED_SCRAPED_CSV,**context)
+        df.write_csv(file_path)
+
+    @task(task_id="SentimentAnalysis.setup")
+    def setup(**context):
+        temp_file_path = get_temp_file_path(**context)
+        os.makedirs(temp_file_path,exist_ok=True)
+
+        
 
     @task(retries=3, task_id="SentimentAnalysis.scrape_news_urls")
     def scrape_news_urls(**context) -> dict[str, str]:
-        articles = context['ti'].xcom_pull(task_ids="SentimentAnalysis.get_news_articles", key="articles")
+        file_path = generate_path(NEED_SCRAPED_CSV,**context)
+        df = polars.scan_csv(file_path)
+        df = df.collect()
         succesfully_scraped = dict()
         failed = list()
         with Stealth().use_sync(sync_playwright()) as pw:
@@ -61,26 +88,38 @@ def sentiment_analysis() -> None:
                                              java_script_enabled=False
                                              )
             page = pg_context.new_page()
-            for article in articles:
+            for url in df['url']:
                 try:
-                    page.goto(article[0])
+                    page.goto(url)
                     downloaded = page.content()
                     result = extract(downloaded)
-                    succesfully_scraped[article[0]] = result
+                    succesfully_scraped[url] = result
                 except Exception as e:
-                    url = article[0]
                     logger.warning(f"Failed to scrape {url}: {e}")
                     failed.append(url)
                     continue
         logger.info(f"SentimentAnalysis scraped content: {succesfully_scraped}")
         logger.info(f"failed to scrape urls {failed}")
-        context['ti'].xcom_push(key='successfully_scraped', value=succesfully_scraped)
-        context['ti'].xcom_push(key='failed_scraped', value=failed)
+        successfull_path = generate_path(SUCCESSFULLY_SCRAPED,**context)
+        failed_path = generate_path(FAILED_SCRAPED,**context)
+        try:
+            with open(successfull_path,'x') as file:
+                json.dump(succesfully_scraped,successfull_path)
+            with open(failed_path, 'x') as file:
+                file.writelines(failed)
+        except Exception as e:
+            logger.error(e)
+
+        
 
     @task(task_id="SentimentAnalysis.update_content")
     def update_content(**context):
-        content_map: dict = context['ti'].xcom_pull(task_ids="SentimentAnalysis.scrape_news_urls",
-                                                    key='successfully_scraped')
+        content_map: dict = dict()
+        try:
+            with open(generate_path(SUCCESSFULLY_SCRAPED,**context)) as file:
+                content_map = json.load(file)
+        except Exception as e:
+            logger.error(e)
         updates = [(url, val) for url, val in content_map.items()]
         successfully_updated = list()
         attempts = 0
@@ -109,12 +148,15 @@ def sentiment_analysis() -> None:
         context['ti'].xcom_push(key="successfully_updated", value=successfully_updated)
         context['ti'].xcom_push(key="failed_updates", value=content_map)
 
-    @task(task_id="SentimentAnalysis.analysis")
-    def run_models(**context):
-        schema = context['ti'].xcom_pull(task_ids="SentimentAnalysis.get_news_articles", key="schema")
-        data = context['ti'].xcom_pull(task_ids="SentimentAnalysis.update_content", key="successfully_updated")
-        df = polars.DataFrame(data=data, schema=schema, orient='row')
-        text = df['content'].to_list()
+    @task(task_id="SentimentAnalysis.sentiment",retries=3)
+    def run_sentiment_model(**context):
+        content_dict = dict()
+        try:
+            with open(generate_path(SUCCESSFULLY_SCRAPED,**context),'r+') as file:
+                content_dict = json.load(file)
+        except Exception as e:
+            logger.error(e)
+        text = [value for _,value in content_dict.items()]
         sentiment_tokenizer = BertTokenizer.from_pretrained("ProsusAI/finbert")
         sentiment_model = BertForSequenceClassification.from_pretrained("ProsusAI/finbert")
         sentiment_analysis = pipeline(task='sentiment-analysis',
@@ -124,11 +166,34 @@ def sentiment_analysis() -> None:
         sentiment = analyze_articles(text, sentiment_analysis)
         logger.info(f"sentiment{sentiment[0:10]}")
 
+    @task(task_id="SentimentAnalysis.classification",retries=3)
+    def run_classification_model(**context):
+        content_dict = dict()
+        try:
+            with open(generate_path(SUCCESSFULLY_SCRAPED,**context),'r+') as file:
+                content_dict = json.load(file)
+        except Exception as e:
+            logger.error(e)
+        text = [value for _,value in content_dict.items()]
+        classification_model = GLiNER.from_pretrained("gliner-community/gliner_medium-v2.5",load_tokenizer=True)
+        for key,value in classification_labels:
+            labels = value
+            classified = classification_model.inference(text,labels,False,multi_label=True,batch_size=16)
+            num = 1
+            for batch in classified:
+                for classification in batch:
+                    logger.info(f"batch {num}:{classification['text']} => {classification["label"]}")
+                num += 1
+
+
+    setup_dag = setup()
     get_news_articles = query_news_articles()
     scraped_content = scrape_news_urls()
-    update = update_content()
-    sentiment = run_models()
-    get_news_articles >> scraped_content >> update >> sentiment
+    sentiment = run_sentiment_model()
+    classification = run_classification_model()
+    setup_dag >> get_news_articles >> scraped_content
+    scraped_content >> sentiment
+    scraped_content >> classification
 
 
 def analyze_articles(articles: list[str], nlp: Pipeline, chunk_size=450) -> list[str]:
@@ -165,15 +230,6 @@ def analyze_articles(articles: list[str], nlp: Pipeline, chunk_size=450) -> list
 
     return sentiments
 
-
-def get_chunks(text: str, nlp: Pipeline, chunk_size: int = 450) -> list[str]:
-    tokenizer = nlp.tokenizer
-    tokens = tokenizer.encode(text=text, add_special_tokens=False)
-    chunks = [
-        tokenizer.decode(tokens[i:i + chunk_size])
-        for i in range(0, len(tokens), chunk_size)
-    ]
-    return chunks
 
 
 sentiment_analysis()

@@ -10,6 +10,8 @@ CLASSIFICATIONS_PATH = Path(r"/home/winig/projects/MacroSentiment/sentiment-anal
 
 class Container(containers.DynamicContainer):
     environment_config = providers.Configuration()
+    classification_config = providers.Configuration()
+    classification_config.from_json(CLASSIFICATIONS_PATH,True)
     environment_config.from_json(ENVIRONMENT_CONFIG_PATH, True)
     redis_host: str = providers.Object(environment_config.REDIS_HOST())
     redis_port: int = providers.Object(environment_config.REDIS_PORT())
@@ -19,6 +21,7 @@ class Container(containers.DynamicContainer):
     psql_username: str = providers.Object(environment_config.PSQL_USERNAME())
     psql_password: str = providers.Object(environment_config.PSQL_PASSWORD())
     psql_db: str = providers.Object(environment_config.PSQL_DATABASE())
+    classification_labels: dict = providers.Object(classification_config)
     conn_info = providers.Singleton(
         lambda host, port, user, db, password: f"host={host} port={port} user={user} dbname={db} password={password}",
         host=environment_config.PSQL_HOST,
