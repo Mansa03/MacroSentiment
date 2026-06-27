@@ -1,0 +1,32 @@
+{
+"entity_labels": 
+    [
+        "organization", 
+        "person", 
+        "regulator", 
+        "legislation"
+    ],
+"event_labels": [
+    "earnings beat", 
+    "earnings miss", 
+    "guidance",
+    "merger acquisition", 
+    "ipo", 
+    "bankruptcy",
+    "layoffs", 
+    "product launch", 
+    "dividend",
+    "stock split", 
+    "buyback", 
+    "leadership change", 
+    "lawsuit"
+],
+"macro_labels": [
+    "monetary policy", 
+    "inflation", 
+    "interest rates",
+    "geopolitical", 
+    "supply chain", 
+    "regulation"
+]
+}
