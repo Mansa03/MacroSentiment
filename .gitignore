@@ -9,7 +9,7 @@ sentiment-analysis/airflow/airflow.db
 **/airflow/airflow.db-wal
 **/airflow/airflow.db-wal
 **/airflow/simple_auth_manager_passwords.json.generated
-**/configs
+**/configs/environment.json
 #not needed yet
 **/fovi/
 **/duckdb/

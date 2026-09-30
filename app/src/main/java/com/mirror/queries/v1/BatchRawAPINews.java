@@ -1,26 +1,19 @@
 package com.mirror.queries.v1;
 
 
-import java.sql.BatchUpdateException;
-import java.sql.Connection;
-
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.util.List;
-
 import com.mirror.models.v1.ImmutableRawAPINews;
-import com.mirror.queries.TransactionResults;
 import com.mirror.queries.FailedTransactions;
 import com.mirror.queries.QueryBiFunction;
-
+import com.mirror.queries.QueryHelper;
+import com.mirror.queries.TransactionResults;
+import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import lombok.AllArgsConstructor;
 
+import java.sql.*;
 import java.util.ArrayList;
-import com.mirror.queries.QueryHelper;
+import java.util.List;
 
 
 @Slf4j
@@ -28,12 +21,13 @@ import com.mirror.queries.QueryHelper;
 public class BatchRawAPINews implements QueryBiFunction<Connection, List<ImmutableRawAPINews>, TransactionResults<ImmutableRawAPINews>> {
     @Getter
     private static final String insertSQL = """
-        INSERT INTO raw_api_news_v1 (url, source_id, source_name, author, title, description, urlToImage, publishedAt, content)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (url) DO NOTHING;
-    """;
+                INSERT INTO raw_api_news_v1 (url, source_id, source_name, author, title, description, urlToImage, publishedAt, content)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (url) DO NOTHING;
+            """;
+
     @Override
-    public TransactionResults<ImmutableRawAPINews> apply(@NonNull Connection conn, @NonNull List<ImmutableRawAPINews> rawAPINewsList) throws SQLException{
+    public TransactionResults<ImmutableRawAPINews> apply(@NonNull Connection conn, @NonNull List<ImmutableRawAPINews> rawAPINewsList) throws SQLException {
         try (PreparedStatement pstmt = conn.prepareStatement(insertSQL)) {
             for (ImmutableRawAPINews news : rawAPINewsList) {
                 pstmt.setString(1, news.url());
@@ -43,7 +37,7 @@ public class BatchRawAPINews implements QueryBiFunction<Connection, List<Immutab
                 pstmt.setString(5, news.title());
                 pstmt.setString(6, news.description());
                 pstmt.setString(7, news.urlToImage());
-                pstmt.setString(8, news.publishedAt());
+                pstmt.setTimestamp(8, Timestamp.from(news.publishedAt()));
                 pstmt.setString(9, news.content());
                 pstmt.addBatch();
             }
@@ -51,12 +45,10 @@ public class BatchRawAPINews implements QueryBiFunction<Connection, List<Immutab
             pstmt.clearBatch();
             pstmt.close();
             return getResults(batchResults, rawAPINewsList, null);
-        }
-        catch (BatchUpdateException e) {
+        } catch (BatchUpdateException e) {
             int[] succeeded = e.getUpdateCounts();
             return getResults(succeeded, rawAPINewsList, e);
-        }
-        catch (SQLException e) {
+        } catch (SQLException e) {
             throw e;
         }
     }
@@ -68,22 +60,20 @@ public class BatchRawAPINews implements QueryBiFunction<Connection, List<Immutab
         List<ImmutableRawAPINews> retryable = new ArrayList<>();
         List<ImmutableRawAPINews> nonRetryable = new ArrayList<>();
         SQLException current = e;
-        for (int i = 0; i < results.length; i++){
-                 if (results[i] > 0 || results[i] == Statement.SUCCESS_NO_INFO) {
-                    succeededTransactions.add(transactions.get(i));
-                 }
-                 else if (results[i] == 0) {
-                    skippedTransactions.add(transactions.get(i));
-                 }
-                 else{
-                     if (QueryHelper.isRetryable(current)) {
-                         retryable.add(transactions.get(i));
-                     } else {
-                         nonRetryable.add(transactions.get(i));
-                     }
-                     current = current.getNextException();
-                 }
+        for (int i = 0; i < results.length; i++) {
+            if (results[i] > 0 || results[i] == Statement.SUCCESS_NO_INFO) {
+                succeededTransactions.add(transactions.get(i));
+            } else if (results[i] == 0) {
+                skippedTransactions.add(transactions.get(i));
+            } else {
+                if (QueryHelper.isRetryable(current)) {
+                    retryable.add(transactions.get(i));
+                } else {
+                    nonRetryable.add(transactions.get(i));
+                }
+                current = current.getNextException();
+            }
         }
-        return new TransactionResults<ImmutableRawAPINews>(succeededTransactions,skippedTransactions, new FailedTransactions<ImmutableRawAPINews>(retryable,nonRetryable));
+        return new TransactionResults<ImmutableRawAPINews>(succeededTransactions, skippedTransactions, new FailedTransactions<ImmutableRawAPINews>(retryable, nonRetryable));
     }
 }

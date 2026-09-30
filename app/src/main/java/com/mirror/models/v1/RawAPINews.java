@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import org.immutables.value.Value;
 
 import javax.annotation.Nullable;
+import java.time.Instant;
 
 @Value.Immutable
 @Value.Style(jdkOnly = true)
@@ -24,7 +25,7 @@ public interface RawAPINews {
     @Nullable
     String urlToImage();
 
-    String publishedAt();
+    Instant publishedAt();
 
     String content();
 }

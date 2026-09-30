@@ -2,6 +2,8 @@ package com.mirror.dagger;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.google.common.collect.Lists;
 import com.mirror.NewsIngestionService;
 import com.mirror.accessors.NewsAPIAccessor;
@@ -39,7 +41,9 @@ public class ApplicationModule {
     @Provides
     @Singleton
     public ObjectMapper provideObjectMapper() {
-        return new ObjectMapper();
+        return new ObjectMapper()
+                .registerModule(new JavaTimeModule())
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     }
 
     @Provides

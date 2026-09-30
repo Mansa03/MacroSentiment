@@ -14,12 +14,13 @@ repositories {
 }
 
 configurations {
-     mockitoAgent
- }
+    mockitoAgent
+}
 
 
 dependencies {
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.15.2'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
     implementation 'com.google.guava:guava:32.1.2-jre'
     implementation 'com.google.dagger:dagger:2.59.1'
     implementation 'org.slf4j:slf4j-api:2.0.7'
