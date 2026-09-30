@@ -19,10 +19,17 @@ import os
 NEED_SCRAPED_CSV = "NEED_SCRAPED.csv"
 SUCCESSFULLY_SCRAPED = "SUCCESSFULLY_SCRAPED.json"
 FAILED_SCRAPED = "FAILED_SCRAPED.txt"
+SUCCESSFULLY_UPDATED = ""
+FAILED_UPDATES = ""
 
 conn_info = container.conn_info()
 postgres_url = container.psql_url()
-classification_labels = container.classification_labels()
+classification_labels: dict = container.classification_labels()
+sentiment_analysis_pipeline = container.sentiment_analysis_pipeline()
+classification_model = container.classification_model()
+summarization_model = container.summarization_model()
+embedding_tokenizer = container.embedding_tokenizer()
+embedding_model = container.embedding_model()
 # Configure logging to output INFO messages and higher to the console
 logger = logging.getLogger(__name__)
 
@@ -38,31 +45,30 @@ def generate_path(file_name,**context) -> str:
      start_date=datetime(2026,6,24),
      schedule=timedelta(minutes=10))
 def sentiment_analysis() -> None:
+    @task(task_id="SentimentAnalysis.setup")
+    def setup(**context):
+        temp_file_path = get_temp_file_path(**context)
+        os.makedirs(temp_file_path,exist_ok=True)
+
     @task(retries=3, task_id="SentimentAnalysis.get_news_articles")
-    def query_news_articles(**context) -> list[str]:
+    def query_news_articles(connection_info,**context) -> list[str]:
         news_articles = list()
         schema = list()
         with duckdb.connect() as conn:
             conn.execute("INSTALL POSTGRES")
             conn.execute("LOAD POSTGRES")
-            conn.execute(f"ATTACH '{conn_info}' AS postgres_db (TYPE POSTGRES)")
+            conn.execute(f"ATTACH '{connection_info}' AS postgres_db (TYPE POSTGRES)")
             conn.execute("SELECT * FROM postgres_db.raw_api_news_v1 WHERE transformed_at is NULL")
             schema = [col[0] for col in conn.description]
             news_articles.extend(conn.fetchall())
         df = DataFrame(data=news_articles,schema=schema, orient='row')
         file_path = generate_path(NEED_SCRAPED_CSV,**context)
         df.write_csv(file_path)
-
-    @task(task_id="SentimentAnalysis.setup")
-    def setup(**context):
-        temp_file_path = get_temp_file_path(**context)
-        os.makedirs(temp_file_path,exist_ok=True)
-
-        
+        context['ti'].xcom_push(key=NEED_SCRAPED_CSV,value=file_path)
 
     @task(retries=3, task_id="SentimentAnalysis.scrape_news_urls")
     def scrape_news_urls(**context) -> dict[str, str]:
-        file_path = generate_path(NEED_SCRAPED_CSV,**context)
+        file_path = context['ti'].xcom_pull(key=NEED_SCRAPED_CSV)
         df = polars.scan_csv(file_path)
         df = df.collect()
         succesfully_scraped = dict()
@@ -104,9 +110,11 @@ def sentiment_analysis() -> None:
         failed_path = generate_path(FAILED_SCRAPED,**context)
         try:
             with open(successfull_path,'x') as file:
-                json.dump(succesfully_scraped,successfull_path)
+                json.dump(succesfully_scraped,file)
             with open(failed_path, 'x') as file:
                 file.writelines(failed)
+            context['ti'].xcom_push(key=SUCCESSFULLY_SCRAPED, value=successfull_path)
+            context['ti'].xcom_push(key=FAILED_SCRAPED, value=failed_path)     
         except Exception as e:
             logger.error(e)
 
@@ -115,8 +123,9 @@ def sentiment_analysis() -> None:
     @task(task_id="SentimentAnalysis.update_content")
     def update_content(**context):
         content_map: dict = dict()
+        successfully_scraped = context['ti'].xcom_pull(key=SUCCESSFULLY_SCRAPED)
         try:
-            with open(generate_path(SUCCESSFULLY_SCRAPED,**context)) as file:
+            with open(successfully_scraped,'r') as file:
                 content_map = json.load(file)
         except Exception as e:
             logger.error(e)
@@ -149,36 +158,34 @@ def sentiment_analysis() -> None:
         context['ti'].xcom_push(key="failed_updates", value=content_map)
 
     @task(task_id="SentimentAnalysis.sentiment",retries=3)
-    def run_sentiment_model(**context):
+    def run_sentiment_model(sentiment_analysis_pipeline,**context):
         content_dict = dict()
+        successfuly_scraped = context['ti'].xcom_pull(key=SUCCESSFULLY_SCRAPED)
+        sentiment = dict()
         try:
-            with open(generate_path(SUCCESSFULLY_SCRAPED,**context),'r+') as file:
+            with open(successfuly_scraped,'r+') as file:
                 content_dict = json.load(file)
         except Exception as e:
             logger.error(e)
         text = [value for _,value in content_dict.items()]
-        sentiment_tokenizer = BertTokenizer.from_pretrained("ProsusAI/finbert")
-        sentiment_model = BertForSequenceClassification.from_pretrained("ProsusAI/finbert")
-        sentiment_analysis = pipeline(task='sentiment-analysis',
-                                      tokenizer=sentiment_tokenizer,
-                                      model=sentiment_model,
-                                      device=-1)
-        sentiment = analyze_articles(text, sentiment_analysis)
+        sentiment = analyze_articles(text, sentiment_analysis_pipeline)
         logger.info(f"sentiment{sentiment[0:10]}")
 
     @task(task_id="SentimentAnalysis.classification",retries=3)
-    def run_classification_model(**context):
+    def run_classification_model(classification_model,**context):
         content_dict = dict()
+        successfuly_scraped = context['ti'].xcom_pull(key=SUCCESSFULLY_SCRAPED)
+        classifications = dict()
         try:
-            with open(generate_path(SUCCESSFULLY_SCRAPED,**context),'r+') as file:
+            with open(successfuly_scraped,'r+') as file:
                 content_dict = json.load(file)
         except Exception as e:
             logger.error(e)
         text = [value for _,value in content_dict.items()]
-        classification_model = GLiNER.from_pretrained("gliner-community/gliner_medium-v2.5",load_tokenizer=True)
-        for key,value in classification_labels:
+        for key,value in classification_labels.items():
             labels = value
             classified = classification_model.inference(text,labels,False,multi_label=True,batch_size=16)
+            logger.info(f"classified length is {len(classified)} for {key} labels")
             num = 1
             for batch in classified:
                 for classification in batch:
@@ -186,14 +193,59 @@ def sentiment_analysis() -> None:
                 num += 1
 
 
+    @task(task_id="SentimentAnalysis.summarization", retries=3)
+    def run_summarization_model(summarization_model: Pipeline,**context):
+        content_dict = dict()
+        summaries = dict()
+        successfuly_scraped = context['ti'].xcom_pull(key=SUCCESSFULLY_SCRAPED)
+        try:
+            with open(successfuly_scraped,'r+') as file:
+                content_dict = json.load(file)
+        except Exception as e:
+            logger.error(e)
+        for url,text in content_dict.items():
+            summary = summarization_model(text,max_length=150,min_length=30, do_sample=False)
+            summaries[url] = summary
+        return summaries
+
+    @task(task_id="SentimentAnalysis.embedding", retries=3)
+    def run_embedding_model(embedding_tokenizer,embedding_model,**context):
+        content_dict = dict()
+        embeddings = dict()
+        successfuly_scraped = context['ti'].xcom_pull(key=SUCCESSFULLY_SCRAPED)
+        try:
+            with open(successfuly_scraped,'r+') as file:
+                content_dict = json.load(file)
+        except Exception as e:
+            logger.error(e)
+        for url,text in content_dict.items():
+            tokenized_text = tokenizer(text, padding=True, truncation=True, return_tensors='pt')
+            embedding = embedding_model(**tokenized_text)
+            embeddings[url] = embedding
+        return embeddings
+
+    @task(task_id="SentimentAnalysis.writeToAnalyticsTable", retries=3)
+    def write_to_analytics_table(sentiment,classification,summary,embeddings,**context):
+        logger.info(f'sentiment:{sentiment}')
+        logger.info(f'classification:{classification}')
+        logger.info(f'summarization:{summary}')
+        logger.info(f'embeddings:{embeddings}')
+    
+
     setup_dag = setup()
-    get_news_articles = query_news_articles()
+    get_news_articles = query_news_articles(conn_info)
     scraped_content = scrape_news_urls()
-    sentiment = run_sentiment_model()
-    classification = run_classification_model()
+    sentiment = run_sentiment_model(sentiment_analysis_pipeline)
+    classification = run_classification_model(classification_model)
+    summarization = run_summarization_model(summarization_model)
+    embedding = run_embedding_model(embedding_tokenizer, embedding_model)
     setup_dag >> get_news_articles >> scraped_content
     scraped_content >> sentiment
     scraped_content >> classification
+    scraped_content >> summarization
+    scraped_content >> embedding
+    write_to_analytics_table(sentiment,classification,summarization,embedding)
+
 
 
 def analyze_articles(articles: list[str], nlp: Pipeline, chunk_size=450) -> list[str]:
