@@ -9,7 +9,7 @@ dbt-duckdb
 redis
 logging
 huggingface-hub
-transformers
+transformers == 4.57.6
 langchain-text-splitters
 gliner
 dependency-injector == 4.49.0
